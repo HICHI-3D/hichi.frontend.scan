@@ -26,6 +26,12 @@
   --color-black: hsl(60 7 5);
   --color-black-20: hsl(60 7 5/0.2);
 
+  /* 상태 강조용 */
+  --color-red-500: hsl(0 78 60);
+  --color-red-500-90: hsl(0 78 60 / 0.9);
+
+  --spacing-0: 0px;
+  --spacing-px: 1px;
   --spacing-4: 0.25rem;
   --spacing-6: 0.375rem;
   --spacing-8: 0.5rem;
