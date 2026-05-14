@@ -1,0 +1,203 @@
+import type { FurnitureItem } from '@entities/furniture';
+import type { ScanJob } from '@entities/scan-job';
+import { FurnitureListSheet } from '@features/furniture-list-sheet';
+import { PhotoScanModal } from '@features/photo-scan';
+import { ScanControls } from '@features/scan-controls';
+import { ScanProgressOverlay } from '@features/scan-progress';
+import { useVideoFrameCapture, VideoScanOverlay } from '@features/video-scan';
+import { pollScanJob, submitVideoScan } from '@shared/api';
+import { useEffect, useRef, useState } from 'react';
+
+type Props = {
+  /** 우측 가구목록 버튼 → 보통 가구 리스트로 복귀. */
+  onExit?: () => void;
+  /** 시트에서 보여줄 사용자의 스캔된 가구 목록. */
+  scannedItems?: FurnitureItem[];
+};
+
+type CameraStatus = 'requesting' | 'granted' | 'denied' | 'unsupported';
+
+const isCameraSupported = () =>
+  typeof navigator !== 'undefined' &&
+  typeof navigator.mediaDevices?.getUserMedia === 'function';
+
+/**
+ * 가구 스캔 뷰 (Figma node 2156:6399).
+ *
+ *  - 풀스크린 카메라 (후면 카메라 우선).
+ *  - 하단 3개 버튼:
+ *      좌: 사진 5장+ 업로드 모달 (PhotoScanModal)
+ *      중: 영상느낌 연속 프레임 캡쳐 (VideoScanOverlay)
+ *      우: 내 스캔 가구 목록 시트 (FurnitureListSheet)
+ *  - 제출 후 ScanProgressOverlay 로 단계(YOLO+SAM → OpenCV → COLMAP → MeshLab) 표시.
+ *  - 카메라 권한은 HTTPS / localhost 에서만 떨어짐.
+ */
+const ScanView = ({ onExit, scannedItems = [] }: Props) => {
+  const videoRef = useRef<HTMLVideoElement>(null);
+  const [status, setStatus] = useState<CameraStatus>(() =>
+    isCameraSupported() ? 'requesting' : 'unsupported',
+  );
+
+  // 모달 / 시트 / 진행 오버레이 상태
+  const [photoOpen, setPhotoOpen] = useState(false);
+  const [sheetOpen, setSheetOpen] = useState(false);
+  const [activeJob, setActiveJob] = useState<ScanJob | null>(null);
+
+  // 영상 캡쳐 훅
+  const capture = useVideoFrameCapture({ videoRef, intervalMs: 200, maxFrames: 25 });
+
+  /* 카메라 스트림 연결 */
+  useEffect(() => {
+    if (!isCameraSupported()) return;
+    const video = videoRef.current;
+    if (!video) return;
+
+    let cancelled = false;
+    let activeStream: MediaStream | null = null;
+
+    navigator.mediaDevices
+      .getUserMedia({
+        video: { facingMode: { ideal: 'environment' } },
+        audio: false,
+      })
+      .then((stream) => {
+        if (cancelled) {
+          stream.getTracks().forEach((t) => t.stop());
+          return;
+        }
+        activeStream = stream;
+        video.srcObject = stream;
+        setStatus('granted');
+      })
+      .catch(() => {
+        if (!cancelled) setStatus('denied');
+      });
+
+    return () => {
+      cancelled = true;
+      activeStream?.getTracks().forEach((t) => t.stop());
+      if (video.srcObject) {
+        video.srcObject = null;
+      }
+    };
+  }, []);
+
+  /* 영상 캡쳐가 끝나면 (capturing false 로 전환되고 frames 채워져 있으면) 자동 submit */
+  useEffect(() => {
+    if (capture.capturing) return;
+    if (capture.frames.length === 0) return;
+    let cancelled = false;
+    submitVideoScan(capture.frames).then((job) => {
+      if (!cancelled) setActiveJob(job);
+    }).catch(() => {
+      /* 사용자에게 별도 토스트는 생략, ScanProgressOverlay 가 실패 케이스 처리 */
+    });
+    return () => { cancelled = true; };
+  }, [capture.capturing, capture.frames]);
+
+  /* 활성 작업 polling */
+  useEffect(() => {
+    if (!activeJob) return;
+    const stop = pollScanJob(activeJob.id, (updated) => {
+      setActiveJob(updated);
+    });
+    return () => stop();
+  }, [activeJob?.id]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const handleStartVideo = () => {
+    if (status !== 'granted') return;
+    capture.start();
+  };
+
+  const handlePhotoSubmitted = (job: ScanJob) => {
+    setPhotoOpen(false);
+    setActiveJob(job);
+  };
+
+  return (
+    <section className="relative h-dvh w-full overflow-hidden bg-black">
+      {/* 카메라 스트림 */}
+      <video
+        ref={videoRef}
+        autoPlay
+        muted
+        playsInline
+        className="size-full object-cover"
+      />
+
+      {/* 권한 상태 안내 */}
+      {status !== 'granted' && (
+        <div className="
+          absolute inset-0 flex-center px-24 text-center text-white
+        ">
+          <p className="body-s">
+            {status === 'requesting' && '카메라를 켜는 중...'}
+            {status === 'denied' &&
+              '카메라 권한이 필요해요. 브라우저 설정에서 허용해 주세요.'}
+            {status === 'unsupported' &&
+              '이 환경에서는 카메라를 사용할 수 없어요. https 또는 localhost 에서 열어 주세요.'}
+          </p>
+        </div>
+      )}
+
+      {/* 영상 캡쳐 중 오버레이 */}
+      {capture.capturing && (
+        <VideoScanOverlay
+          framesCaptured={capture.frames.length}
+          onStop={capture.stop}
+        />
+      )}
+
+      {/* 하단 3개 버튼 — 좌: 사진 / 중: 영상 / 우: 시트 */}
+      {!capture.capturing && !activeJob && (
+        <div className="absolute inset-x-0 bottom-0">
+          <ScanControls
+            onOpenSettings={() => setPhotoOpen(true)}
+            onToggleScan={handleStartVideo}
+            onOpenGallery={() => setSheetOpen(true)}
+          />
+        </div>
+      )}
+
+      {/* 사진 스캔 모달 */}
+      <PhotoScanModal
+        open={photoOpen}
+        onClose={() => setPhotoOpen(false)}
+        onSubmitted={handlePhotoSubmitted}
+      />
+
+      {/* 가구 목록 시트 */}
+      <FurnitureListSheet
+        open={sheetOpen}
+        items={scannedItems}
+        onClose={() => setSheetOpen(false)}
+      />
+
+      {/* 진행 상태 오버레이 */}
+      {activeJob && (
+        <ScanProgressOverlay
+          job={activeJob}
+          onDismiss={() => setActiveJob(null)}
+        />
+      )}
+
+      {/* 별도 종료 버튼: 우측 가구목록 버튼은 시트 열기로 바뀌었으므로
+          외부 onExit 콜백은 가구 목록 시트에서 "닫기" 동작과 결합하지 않고
+          별도 트리거가 필요한 경우 호출하도록 노출만 함. */}
+      {onExit && status === 'denied' && (
+        <button
+          type="button"
+          onClick={onExit}
+          className="
+            absolute top-16 right-16 rounded-max bg-white/90 px-16 py-8 label-l
+            text-gray-800
+          "
+        >
+          돌아가기
+        </button>
+      )}
+    </section>
+  );
+};
+
+export default ScanView;
