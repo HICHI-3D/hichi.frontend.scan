@@ -3,9 +3,10 @@ import type { ScanJob } from '@entities/scan-job';
 import { FurnitureListSheet } from '@features/furniture-list-sheet';
 import { PhotoScanModal } from '@features/photo-scan';
 import { ScanControls } from '@features/scan-controls';
-import { ScanProgressOverlay } from '@features/scan-progress';
+import { ScanProgressOverlay, useScanJob } from '@features/scan-progress';
 import { useVideoFrameCapture, VideoScanOverlay } from '@features/video-scan';
-import { pollScanJob, submitVideoScan } from '@shared/api';
+import { submitVideoScan } from '@shared/api';
+import { useQueryClient } from '@tanstack/react-query';
 import { useEffect, useRef, useState } from 'react';
 
 type Props = {
@@ -41,7 +42,10 @@ const ScanView = ({ onExit, scannedItems = [] }: Props) => {
   // 모달 / 시트 / 진행 오버레이 상태
   const [photoOpen, setPhotoOpen] = useState(false);
   const [sheetOpen, setSheetOpen] = useState(false);
-  const [activeJob, setActiveJob] = useState<ScanJob | null>(null);
+  // jobId 만 state 로 보관하고, 진행률 데이터는 useScanJob (RQ) 이 캐시 + refetchInterval 로 관리.
+  const [jobId, setJobId] = useState<string | null>(null);
+  const activeJob = useScanJob(jobId);
+  const queryClient = useQueryClient();
 
   // 영상 캡쳐 훅
   const capture = useVideoFrameCapture({ videoRef, intervalMs: 200, maxFrames: 25 });
@@ -82,27 +86,28 @@ const ScanView = ({ onExit, scannedItems = [] }: Props) => {
     };
   }, []);
 
-  /* 영상 캡쳐가 끝나면 (capturing false 로 전환되고 frames 채워져 있으면) 자동 submit */
+  /* 새 잡이 시작되면 RQ 캐시에 prefill + jobId 저장 + 결과 시트 열기.
+     활성 작업 폴링은 useScanJob 의 refetchInterval 이 담당 — 백엔드 GET /furniture/{id}
+     호출이 곁가지로 AI 폴링 + SSE broadcast 를 트리거하므로 좌측 패널/시트도 같이 갱신된다. */
+  const startJob = (job: ScanJob) => {
+    queryClient.setQueryData(['furniture', job.id], job);
+    setJobId(job.id);
+    setSheetOpen(true);
+  };
+
+  /* 영상 캡쳐가 끝나면 (capturing false 로 전환되고 frames 채워져 있으면) 자동 submit. */
   useEffect(() => {
     if (capture.capturing) return;
     if (capture.frames.length === 0) return;
     let cancelled = false;
     submitVideoScan(capture.frames).then((job) => {
-      if (!cancelled) setActiveJob(job);
+      if (!cancelled) startJob(job);
     }).catch(() => {
       /* 사용자에게 별도 토스트는 생략, ScanProgressOverlay 가 실패 케이스 처리 */
     });
     return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [capture.capturing, capture.frames]);
-
-  /* 활성 작업 polling */
-  useEffect(() => {
-    if (!activeJob) return;
-    const stop = pollScanJob(activeJob.id, (updated) => {
-      setActiveJob(updated);
-    });
-    return () => stop();
-  }, [activeJob?.id]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const handleStartVideo = () => {
     if (status !== 'granted') return;
@@ -111,7 +116,7 @@ const ScanView = ({ onExit, scannedItems = [] }: Props) => {
 
   const handlePhotoSubmitted = (job: ScanJob) => {
     setPhotoOpen(false);
-    setActiveJob(job);
+    startJob(job);
   };
 
   return (
@@ -177,7 +182,7 @@ const ScanView = ({ onExit, scannedItems = [] }: Props) => {
       {activeJob && (
         <ScanProgressOverlay
           job={activeJob}
-          onDismiss={() => setActiveJob(null)}
+          onDismiss={() => setJobId(null)}
         />
       )}
 

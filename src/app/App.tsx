@@ -3,6 +3,8 @@ import { FurnitureListPanel } from '@widgets/furniture-list-panel';
 import { ScanView } from '@widgets/scan-view';
 import { useState } from 'react';
 
+import AppProviders from './providers';
+
 type View = 'furniture' | 'scan';
 
 const furnitureItems: FurnitureItem[] = Array.from({ length: 8 }).map(
@@ -18,16 +20,18 @@ const App = () => {
   const [view, setView] = useState<View>('furniture');
 
   return (
-    <main className="min-h-dvh w-full bg-gray-100">
-      {view === 'scan' ? (
-        <ScanView onExit={() => setView('furniture')} />
-      ) : (
-        <FurnitureListPanel
-          items={furnitureItems}
-          onAddFurniture={() => setView('scan')}
-        />
-      )}
-    </main>
+    <AppProviders>
+      <main className="min-h-dvh w-full bg-gray-100">
+        {view === 'scan' ? (
+          <ScanView onExit={() => setView('furniture')} />
+        ) : (
+          <FurnitureListPanel
+            items={furnitureItems}
+            onAddFurniture={() => setView('scan')}
+          />
+        )}
+      </main>
+    </AppProviders>
   );
 };
 
