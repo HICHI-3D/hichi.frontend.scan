@@ -1,4 +1,5 @@
 import type { ScanJob } from '@entities/scan-job';
+import { useState } from 'react';
 
 import usePhotoScan from '../model/usePhotoScan';
 import PhotoDropzone from './PhotoDropzone';
@@ -21,6 +22,7 @@ const MIN_FILES = 5;
  */
 const PhotoScanModal = ({ open, onClose, onSubmitted }: Props) => {
   const { files, addFiles, removeFile, submit, submitting } = usePhotoScan();
+  const [error, setError] = useState<string | null>(null);
 
   if (!open) return null;
 
@@ -30,8 +32,17 @@ const PhotoScanModal = ({ open, onClose, onSubmitted }: Props) => {
 
   const handleSubmit = async () => {
     if (!canSubmit) return;
-    const job = await submit();
-    onSubmitted?.(job);
+    setError(null);
+    try {
+      const job = await submit();
+      onSubmitted?.(job);
+    } catch (e) {
+      // 백엔드 미가동·CORS·400 응답 등 모든 실패가 여기로 모인다.
+      // 사용자에겐 메시지를 표시하고 콘솔에는 raw 객체를 남겨 디버깅 가능하게 한다.
+      const msg = e instanceof Error ? e.message : '스캔 요청에 실패했어요.';
+      console.error('[PhotoScanModal] submit error:', e);
+      setError(msg);
+    }
   };
 
   return (
@@ -76,6 +87,14 @@ const PhotoScanModal = ({ open, onClose, onSubmitted }: Props) => {
 
         {/* 푸터 */}
         <div className="col gap-8 px-20 py-16">
+          {error && (
+            <p
+              role="alert"
+              className="text-center label-m text-red-500"
+            >
+              {error}
+            </p>
+          )}
           <p className="text-center label-m">
             <span className={enough ? 'text-gray-700' : 'text-red-500'}>
               {files.length}

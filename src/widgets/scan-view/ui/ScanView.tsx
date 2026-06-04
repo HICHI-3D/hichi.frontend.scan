@@ -102,8 +102,13 @@ const ScanView = ({ onExit, scannedItems = [] }: Props) => {
     let cancelled = false;
     submitVideoScan(capture.frames).then((job) => {
       if (!cancelled) startJob(job);
-    }).catch(() => {
-      /* 사용자에게 별도 토스트는 생략, ScanProgressOverlay 가 실패 케이스 처리 */
+    }).catch((e) => {
+      // 백엔드 미가동·CORS·400 등 실패. ScanProgressOverlay 가 잡 없이는 안 뜨므로
+      // 콘솔에 raw 객체를 남기고 사용자에게 alert 로 알린다 (간단한 토스트 컴포넌트가
+      // 도입되면 그때 교체).
+      console.error('[ScanView] submitVideoScan error:', e);
+      const msg = e instanceof Error ? e.message : '영상 스캔 요청에 실패했어요.';
+      if (!cancelled) window.alert(msg);
     });
     return () => { cancelled = true; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
