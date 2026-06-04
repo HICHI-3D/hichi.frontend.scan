@@ -50,32 +50,39 @@ const FurnitureCard = ({ item, onClick }: Props) => {
     >
       <span className="label-l text-gray-800">{item.name}</span>
 
-      {/* 썸네일 박스 (size-108, gray-100) */}
-      <div className="
-        relative flex-center size-[108px] overflow-clip rounded-8 bg-gray-100
-      ">
+      {/* 썸네일 박스 (size-108, gray-100).
+          parent 는 `relative` 만 — `flex-center` 를 쓰면 <img> 가 flex item
+          으로 잡혀 `size-full` 이 무시되고 자연 크기로 튀어나오는 이슈가 있어,
+          Figma (2156:6426) 와 동일하게 자식 쪽을 absolute / flex 로 분기.  */}
+      <div className="relative size-[108px] overflow-clip rounded-8 bg-gray-100">
         {item.modelUrl ? (
-          <FurnitureThumbnail3D modelUrl={item.modelUrl} alt={item.name} size={108} />
+          <div className="flex-center size-full">
+            <FurnitureThumbnail3D modelUrl={item.modelUrl} alt={item.name} size={108} />
+          </div>
         ) : item.thumbnailUrl ? (
           <img
             src={item.thumbnailUrl}
             alt={item.name}
-            className="size-full object-cover"
+            className="
+              absolute inset-0 block size-full max-w-none object-contain p-4
+            "
           />
         ) : (
-          <FurnitureThumbnail category={item.category} size={108} />
+          <div className="flex-center size-full">
+            <FurnitureThumbnail category={item.category} size={108} />
+          </div>
         )}
 
         {/* 진행 중 오버레이 — 카드 위에 progress 와 stage 라벨을 띄움 */}
         {inProgress && (
           <div
             className="
-              absolute inset-0 col items-center justify-end gap-4 bg-black/55 px-6 py-6
-              text-center
+              absolute inset-0 col items-center justify-end gap-4 bg-black/55
+              p-6 text-center
             "
           >
             <span className="label-s text-white">{item.scanStage ?? '진행 중'}</span>
-            <div className="h-1.5 w-full overflow-hidden rounded bg-white/30">
+            <div className="h-1.5 rounded-sm w-full overflow-hidden bg-white/30">
               <div
                 className="h-full bg-white transition-all"
                 style={{ width: `${progressPct}%` }}
@@ -89,7 +96,8 @@ const FurnitureCard = ({ item, onClick }: Props) => {
         {!inProgress && item.scanStatus === 'failed' && (
           <div
             className="
-              absolute inset-0 flex-center bg-red-500/70 px-6 text-center text-white
+              absolute inset-0 flex-center bg-red-500/70 px-6 text-center
+              text-white
             "
           >
             <span className="label-s">스캔 실패</span>

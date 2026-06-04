@@ -7,10 +7,13 @@
 
   --color-functional-Pear: hsl(65 67 54);
   --color-functional-Pear-60: hsl(65 67 54 / 0.6);
-  --color-functional-indigo: hsl(258 73 74);
-  --color-functional-indigo-60: hsl(258 73 74/0.6);
-  --color-functional-indigo-40: hsl(258 73 74/0.4);
-  --color-functional-indigo-20: hsl(258 73 74/0.2);
+  /* 디자인 시스템 (Figma 2017:27 / 2156:6426): accent = #4caf50 ≈ hsl(122 39 49).
+     `functional-indigo` 은 hichi.client.web 와 동일한 네이밍 컨벤션을 유지하기 위해
+     이름은 그대로 두고 값만 그린으로 갱신. */
+  --color-functional-indigo: hsl(122 39 49);
+  --color-functional-indigo-60: hsl(122 39 49 / 0.6);
+  --color-functional-indigo-40: hsl(122 39 49 / 0.4);
+  --color-functional-indigo-20: hsl(122 39 49 / 0.2);
 
   --color-white: hsl(43 64 98);
   --color-gray-100: hsl(40 27 96);
