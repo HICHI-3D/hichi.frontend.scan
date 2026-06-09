@@ -7,7 +7,7 @@ import { ScanProgressOverlay, useScanJob } from '@features/scan-progress';
 import { useVideoFrameCapture, VideoScanOverlay } from '@features/video-scan';
 import { submitVideoScan } from '@shared/api';
 import { useQueryClient } from '@tanstack/react-query';
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, useCallback } from 'react';
 
 type Props = {
   /** 우측 가구목록 버튼 → 보통 가구 리스트로 복귀. */
@@ -42,13 +42,22 @@ const ScanView = ({ onExit, scannedItems = [] }: Props) => {
   // 모달 / 시트 / 진행 오버레이 상태
   const [photoOpen, setPhotoOpen] = useState(false);
   const [sheetOpen, setSheetOpen] = useState(false);
+  const [videoError, setVideoError] = useState<string | null>(null);
+  const errorTimerRef = useRef<number | null>(null);
+
+  const showError = useCallback((msg: string) => {
+    setVideoError(msg);
+    if (errorTimerRef.current !== null) window.clearTimeout(errorTimerRef.current);
+    errorTimerRef.current = window.setTimeout(() => setVideoError(null), 4000);
+  }, []);
   // jobId 만 state 로 보관하고, 진행률 데이터는 useScanJob (RQ) 이 캐시 + refetchInterval 로 관리.
   const [jobId, setJobId] = useState<string | null>(null);
   const activeJob = useScanJob(jobId);
   const queryClient = useQueryClient();
 
-  // 영상 캡쳐 훅
-  const capture = useVideoFrameCapture({ videoRef, intervalMs: 200, maxFrames: 25 });
+  // 영상 캡쳐 훅 — maxFrames 를 상수로 분리해 VideoScanOverlay 에도 전달
+  const VIDEO_MAX_FRAMES = 25;
+  const capture = useVideoFrameCapture({ videoRef, intervalMs: 200, maxFrames: VIDEO_MAX_FRAMES });
 
   /* 카메라 스트림 연결 */
   useEffect(() => {
@@ -103,19 +112,24 @@ const ScanView = ({ onExit, scannedItems = [] }: Props) => {
     submitVideoScan(capture.frames).then((job) => {
       if (!cancelled) startJob(job);
     }).catch((e) => {
-      // 백엔드 미가동·CORS·400 등 실패. ScanProgressOverlay 가 잡 없이는 안 뜨므로
-      // 콘솔에 raw 객체를 남기고 사용자에게 alert 로 알린다 (간단한 토스트 컴포넌트가
-      // 도입되면 그때 교체).
       console.error('[ScanView] submitVideoScan error:', e);
       const msg = e instanceof Error ? e.message : '영상 스캔 요청에 실패했어요.';
-      if (!cancelled) window.alert(msg);
+      if (!cancelled) showError(msg);
     });
     return () => { cancelled = true; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [capture.capturing, capture.frames]);
 
+  // 언마운트 시 타이머 정리
+  useEffect(() => {
+    return () => {
+      if (errorTimerRef.current !== null) window.clearTimeout(errorTimerRef.current);
+    };
+  }, []);
+
   const handleStartVideo = () => {
     if (status !== 'granted') return;
+    setVideoError(null);
     capture.start();
   };
 
@@ -150,10 +164,43 @@ const ScanView = ({ onExit, scannedItems = [] }: Props) => {
         </div>
       )}
 
+      {/* 에러 토스트 — 영상 스캔 제출 실패 시 4초간 표시 */}
+      {videoError && (
+        <div className="absolute top-20 inset-x-0 flex-center px-24 pointer-events-none z-40">
+          <div
+            role="alert"
+            className="
+              flex items-center gap-10 rounded-16 bg-[#e94747]/90
+              px-16 py-10 pointer-events-auto
+            "
+          >
+            <span className="label-m text-white">{videoError}</span>
+            <button
+              type="button"
+              aria-label="닫기"
+              onClick={() => setVideoError(null)}
+              className="flex-center size-18 shrink-0 rounded-max bg-white/20 text-white label-s"
+            >
+              ×
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* 촬영 전 안내 뱃지 — 카메라 권한 있고, 캡쳐/잡 없을 때만 표시 */}
+      {status === 'granted' && !capture.capturing && !activeJob && (
+        <div className="absolute top-16 inset-x-0 flex-center pointer-events-none">
+          <span className="label-s text-white bg-black/50 rounded-max px-14 py-6">
+            중앙 버튼을 눌러 가구 주위를 촬영하세요
+          </span>
+        </div>
+      )}
+
       {/* 영상 캡쳐 중 오버레이 */}
       {capture.capturing && (
         <VideoScanOverlay
           framesCaptured={capture.frames.length}
+          maxFrames={VIDEO_MAX_FRAMES}
           onStop={capture.stop}
         />
       )}
