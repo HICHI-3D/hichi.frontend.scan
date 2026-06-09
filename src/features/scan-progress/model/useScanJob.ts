@@ -2,18 +2,15 @@ import type { ScanJob } from '@entities/scan-job';
 import { getScanJob } from '@shared/api';
 import { useQuery } from '@tanstack/react-query';
 
-const POLL_INTERVAL_MS = 1000;
-
 /**
  * 단일 스캔 잡의 진행률을 추적하는 훅.
  *
- *   queryKey = ['furniture', jobId] — useFurnitureList 의 ['furniture'] prefix
- *   invalidation 에 함께 잡힌다.
+ *   queryKey = ['furniture', jobId] — ScanPage 에 마운트된 useFurnitureList 가
+ *   EventSource 로 SSE 를 상시 구독하고, furniture_updated 이벤트마다
+ *   ['furniture'] prefix 전체를 invalidate 한다.
+ *   → 이 훅도 자동으로 최신 데이터를 받으므로 refetchInterval 불필요.
  *
- *   refetchInterval 이 setTimeout 기반 폴링(pollScanJob) 의 역할을 대체한다.
- *   `GET /api/furniture/{id}` 가 백엔드 hichi.ai 동기화 + SSE broadcast 를
- *   트리거하므로, 폴링 자체가 백엔드 동기화 트리거 역할도 같이 한다.
- *   잡이 completed / failed / cancelled 상태가 되면 자동으로 refetch 중단.
+ *   백엔드 scan_poller 가 1초마다 AI → DB 동기화 + SSE broadcast 를 담당한다.
  */
 const useScanJob = (jobId: string | null | undefined): ScanJob | null => {
   const enabled = Boolean(jobId);
@@ -27,18 +24,6 @@ const useScanJob = (jobId: string | null | undefined): ScanJob | null => {
       return job;
     },
     enabled,
-    refetchInterval: (q) => {
-      const data = q.state.data;
-      if (!data) return POLL_INTERVAL_MS;
-      if (
-        data.status === 'completed' ||
-        data.status === 'failed' ||
-        data.status === 'cancelled'
-      ) {
-        return false;
-      }
-      return POLL_INTERVAL_MS;
-    },
   });
 
   return query.data ?? null;

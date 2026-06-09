@@ -81,6 +81,8 @@ export const mapStatusLabel = (
   switch (stage) {
     case 'preparing':
       return '이미지 준비 중';
+    case 'background_removal':
+      return '배경 제거 중 (SAM)';
     case 'feature_extraction':
       return '특징점 추출 (COLMAP)';
     case 'matching':
